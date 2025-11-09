@@ -3042,8 +3042,10 @@
                 // שמירת שווי התיק לפי מחיר קנייה (costBasis) לפני הוספת המניה החדשה
                 const valueBeforeNewHolding = getTotalPortfolioValueAtCost();
                 
+                const timestamp = Date.now();
+
                 const newHolding = {
-                    id: Date.now(),
+                    id: timestamp,
                     symbol,
                     shares,
                     costBasis: cost,
@@ -3057,17 +3059,34 @@
                 
                 console.log('➕ Adding holding:', newHolding);
                 portfolio.holdings.push(newHolding);
-                
+
                 // עדכן portfolio.cash - הפחת את סכום הקנייה במטבע המקורי
                 if (!portfolio.cash) portfolio.cash = { ILS: 0, USD: 0, EUR: 0 };
-                portfolio.cash[currency] = (portfolio.cash[currency] || 0) - purchaseAmountInCurrency;
+                const cashBeforePurchase = portfolio.cash[currency] || 0;
+                let newCashBalance = cashBeforePurchase;
+                let depositCurrencyAmount = 0;
+                let depositAmountILS = 0;
+
+                if (fundingSource === 'deposit') {
+                    const shortageInCurrency = Math.max(0, purchaseAmountInCurrency - cashBeforePurchase);
+                    depositCurrencyAmount = shortageInCurrency > 0 ? shortageInCurrency : purchaseAmountInCurrency;
+
+                    if (depositCurrencyAmount > 0) {
+                        newCashBalance += depositCurrencyAmount;
+                        depositAmountILS = convertToILS(depositCurrencyAmount, currency);
+                        console.log(`💰 הפקדה: נוסף ${depositCurrencyAmount.toFixed(2)} ${currency} למזומן לפני הקנייה`);
+                    }
+                }
+
+                newCashBalance -= purchaseAmountInCurrency;
+                portfolio.cash[currency] = newCashBalance;
                 console.log(`💰 קנייה: הופחת ${purchaseAmountInCurrency.toFixed(2)} ${currency} מיתרת המזומן`);
                 console.log(`   יתרת ${currency} חדשה: ${portfolio.cash[currency].toFixed(2)}`);
                 console.log(`   (סכום בשקלים: ₪${purchaseAmount.toFixed(2)})`);
-                
+
                 // רישום הקנייה
                 const purchase = {
-                    id: Date.now(),
+                    id: timestamp + 1,
                     date: purchaseDate,  // ← תאריך קנייה אמיתי!
                     amount: purchaseAmount,
                     assetType: 'stocks',
@@ -3076,25 +3095,49 @@
                     note: `קנייה: ${shares} × ${currency}${cost}`
                 };
                 portfolio.purchases.push(purchase);
-                
+
                 // אם צריך הפקדה - יצירת הפקדה ו-snapshot
-                if (fundingSource === 'deposit') {
-                    const depositAmount = availableCash < 0 ? purchaseAmount : (purchaseAmount - availableCash);
+                if (fundingSource === 'deposit' && depositAmountILS > 0) {
+                    const depositGroupId = `auto-stock-deposit-${timestamp}`;
                     const deposit = {
-                        id: Date.now() + 1,
+                        id: timestamp + 2,
+                        groupId: depositGroupId,
                         date: purchaseDate,  // ← תאריך קנייה אמיתי!
-                        amount: depositAmount,
+                        amount: depositAmountILS,
                         assetType: 'stocks',
+                        currency: 'ILS',
+                        sourceCurrency: currency,
                         note: `הפקדה לקנייה: ${symbol}`
                     };
+                    if (!Array.isArray(portfolio.deposits)) {
+                        portfolio.deposits = [];
+                    }
                     portfolio.deposits.push(deposit);
-                    
+
+                    if (!Array.isArray(portfolio.cashFlows)) {
+                        portfolio.cashFlows = [];
+                    }
+                    portfolio.cashFlows.push({
+                        id: timestamp + 3,
+                        groupId: depositGroupId,
+                        type: 'deposit',
+                        amount: depositAmountILS,
+                        assetType: 'stocks',
+                        currency: 'ILS',
+                        sourceCurrency: currency,
+                        date: purchaseDate,
+                        note: `הפקדה לקנייה: ${symbol}`
+                    });
+
                     // יצירת snapshot עם שווי לפני הקנייה
+                    if (!Array.isArray(portfolio.snapshots)) {
+                        portfolio.snapshots = [];
+                    }
                     const snapshot = {
-                        id: Date.now() + 2,
+                        id: timestamp + 4,
                         date: purchaseDate,  // ← תאריך קנייה אמיתי!
                         value_before_flow: valueBeforeNewHolding,
-                        cash_flow: depositAmount,
+                        cash_flow: depositAmountILS,
                         stocksValue: getTotalValueILS(),
                         bondsValue: portfolio.bonds.reduce((sum, b) => sum + (b.units * b.currentPrice), 0),
                         implicitCash: getImplicitCash('all'),
@@ -3270,16 +3313,20 @@
             const costBasis = parseFloat(document.getElementById('bond-cost').value);
             const purchaseDate = document.getElementById('bond-purchase-date').value;
             const currency = document.getElementById('bond-currency').value;
-            
+
             if (!symbol || !units || !costBasis || !purchaseDate) {
                 notify('❌ יש למלא את כל השדות החובה', 'error');
                 return;
             }
-            
+
+            if (!portfolio.cash) {
+                portfolio.cash = { ILS: 0, USD: 0, EUR: 0 };
+            }
+
             // בדיקת מזומן זמין
             const totalCost = units * costBasis;
             const availableCash = portfolio.cash[currency] || 0;
-            
+
             if (availableCash < totalCost) {
                 const shortage = totalCost - availableCash;
                 const currSymbol = getCurrencySymbol(currency);
@@ -3300,32 +3347,42 @@
                 if (depositNow) {
                     // הפקדה אוטומטית
                     portfolio.cash[currency] = availableCash + shortage;
-                    
+
+                    const shortageILS = convertToILS(shortage, currency);
+                    const depositId = Date.now();
+                    const depositGroupId = `auto-bond-deposit-${depositId}`;
+
                     // רשום בdeposits (להיסטוריה)
                     if (!Array.isArray(portfolio.deposits)) {
                         portfolio.deposits = [];
                     }
                     portfolio.deposits.push({
-                        id: Date.now(),
-                        amount: shortage,
+                        id: depositId,
+                        groupId: depositGroupId,
+                        amount: shortageILS,
+                        assetType: 'bonds',
                         date: purchaseDate,
-                        currency: currency,
+                        currency: 'ILS',
+                        sourceCurrency: currency,
                         note: `הפקדה אוטומטית לקניית ${symbol}`
                     });
-                    
+
                     // רשום בcashFlows (ל-MWR)
                     if (!Array.isArray(portfolio.cashFlows)) {
                         portfolio.cashFlows = [];
                     }
                     portfolio.cashFlows.push({
-                        id: Date.now() + 1,
+                        id: depositId + 1,
+                        groupId: depositGroupId,
                         type: 'deposit',
-                        amount: shortage,
+                        amount: shortageILS,
+                        assetType: 'bonds',
                         date: purchaseDate,
-                        currency: currency,
+                        currency: 'ILS',
+                        sourceCurrency: currency,
                         note: `הפקדה אוטומטית לקניית ${symbol}`
                     });
-                    
+
                     notify(`✅ הופקדו ${currSymbol}${shortage.toFixed(2)}`, 'success');
                 } else {
                     notify('❌ הקנייה בוטלה - אין מספיק מזומן', 'error');
@@ -3624,33 +3681,77 @@ ${msg}`, 'warning');
             bond.costBasis = newAvgCost;
             bond.lastUpdate = new Date().toISOString();
             
+            // ודא שמבנה המזומן קיים
+            if (!portfolio.cash) {
+                portfolio.cash = { ILS: 0, USD: 0, EUR: 0 };
+            }
+            const cashBeforePurchase = portfolio.cash.ILS || 0;
+            let depositAmount = 0;
+
+            if (fundingSource === 'deposit') {
+                const shortage = Math.max(0, purchaseAmount - cashBeforePurchase);
+                depositAmount = shortage > 0 ? shortage : purchaseAmount;
+
+                if (depositAmount > 0) {
+                    portfolio.cash.ILS = cashBeforePurchase + depositAmount;
+                    console.log(`💰 הפקדה: נוסף ₪${depositAmount.toFixed(2)} למזומן לפני קניית אג"ח`);
+                }
+            }
+
+            portfolio.cash.ILS = (portfolio.cash.ILS || 0) - purchaseAmount;
+            console.log(`💰 קנייה: הופחתו ₪${purchaseAmount.toFixed(2)} מהמזומן עבור אג"ח`);
+            console.log(`   יתרת מזומן חדשה באג"ח: ₪${(portfolio.cash.ILS || 0).toFixed(2)}`);
+
             // רישום הקנייה
+            const transactionTimestamp = Date.now();
+            const transactionDate = new Date().toISOString();
+
             const purchase = {
-                id: Date.now(),
-                date: new Date().toISOString(),
+                id: transactionTimestamp,
+                date: transactionDate,
                 amount: purchaseAmount,
                 assetType: 'bonds',
                 assetId: bond.id,
                 note: `קנייה: ${unitsNum} יחידות ${bond.name}`
             };
             portfolio.purchases.push(purchase);
-            
-            // אם צריך הפקדה
-            if (fundingSource === 'deposit') {
-                const depositAmount = availableCash < 0 ? purchaseAmount : (purchaseAmount - availableCash);
+
+            // אם בוצעה הפקדה - רשום אותה ושמור snapshot
+            if (fundingSource === 'deposit' && depositAmount > 0) {
+                if (!Array.isArray(portfolio.deposits)) {
+                    portfolio.deposits = [];
+                }
+
                 const deposit = {
-                    id: Date.now() + 1,
-                    date: new Date().toISOString(),
+                    id: transactionTimestamp + 1,
+                    date: transactionDate,
                     amount: depositAmount,
                     assetType: 'bonds',
+                    currency: 'ILS',
                     note: `הפקדה לקנייה: ${bond.name}`
                 };
                 portfolio.deposits.push(deposit);
-                
-                // יצירת snapshot עם שווי לפני הקנייה
+
+                if (!Array.isArray(portfolio.cashFlows)) {
+                    portfolio.cashFlows = [];
+                }
+                portfolio.cashFlows.push({
+                    id: transactionTimestamp + 2,
+                    type: 'deposit',
+                    amount: depositAmount,
+                    assetType: 'bonds',
+                    currency: 'ILS',
+                    date: transactionDate,
+                    note: `הפקדה לקנייה: ${bond.name}`
+                });
+
+                if (!Array.isArray(portfolio.snapshots)) {
+                    portfolio.snapshots = [];
+                }
+
                 const snapshot = {
-                    id: Date.now() + 2,
-                    date: new Date().toISOString(),
+                    id: transactionTimestamp + 3,
+                    date: transactionDate,
                     value_before_flow: valueBeforeUpdate,
                     cash_flow: depositAmount,
                     stocksValue: getTotalValueILS(),
