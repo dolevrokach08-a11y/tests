@@ -14,6 +14,9 @@ import {
   Sun,
   Menu,
   X,
+  Activity,
+  Banknote,
+  FileText,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSettings, usePortfolioStore } from '@/stores/portfolioStore';
@@ -30,6 +33,9 @@ const navItems = [
   { path: '/cash-flow', label: 'תזרים', icon: ArrowLeftRight },
   { path: '/history', label: 'היסטוריה', icon: History },
   { path: '/calculator', label: 'מחשבון', icon: Calculator },
+  { path: '/analysis', label: 'ניתוח', icon: Activity },
+  { path: '/dividends', label: 'דיבידנדים', icon: Banknote },
+  { path: '/tax-report', label: 'דוח מס', icon: FileText },
   { path: '/groups', label: 'קבוצות', icon: Layers },
   { path: '/settings', label: 'הגדרות', icon: Settings },
 ];

@@ -161,28 +161,70 @@ export async function fetchExchangeRates(): Promise<{
   USD: number;
   EUR: number;
 } | null> {
-  try {
-    // Try Frankfurter API first
-    const response = await fetch(
-      'https://api.frankfurter.app/latest?from=ILS&to=USD,EUR'
-    );
+  // Try multiple APIs in order of preference
+  const apis = [
+    // 1. ExchangeRate API (free, supports ILS)
+    async () => {
+      const response = await fetch(
+        'https://api.exchangerate-api.com/v4/latest/USD'
+      );
+      if (!response.ok) throw new Error('ExchangeRate API error');
+      const data = await response.json();
+      // This gives us rates FROM USD, so USD->ILS rate is data.rates.ILS
+      const usdToIls = data.rates.ILS;
+      const eurToIls = data.rates.ILS / data.rates.EUR;
+      return { USD: usdToIls, EUR: eurToIls };
+    },
 
-    if (!response.ok) {
-      throw new Error('Frankfurter API error');
+    // 2. Open Exchange Rates (backup)
+    async () => {
+      const response = await fetch(
+        'https://open.er-api.com/v6/latest/USD'
+      );
+      if (!response.ok) throw new Error('Open ER API error');
+      const data = await response.json();
+      const usdToIls = data.rates.ILS;
+      const eurToIls = data.rates.ILS / data.rates.EUR;
+      return { USD: usdToIls, EUR: eurToIls };
+    },
+
+    // 3. Bank of Israel XML (last resort)
+    async () => {
+      const response = await fetch(
+        'https://api.allorigins.win/raw?url=' +
+          encodeURIComponent('https://www.boi.org.il/currency.xml')
+      );
+      if (!response.ok) throw new Error('BOI API error');
+      const text = await response.text();
+
+      // Parse XML to get rates
+      const usdMatch = text.match(/<CURRENCYCODE>USD<\/CURRENCYCODE>[\s\S]*?<RATE>([\d.]+)<\/RATE>/);
+      const eurMatch = text.match(/<CURRENCYCODE>EUR<\/CURRENCYCODE>[\s\S]*?<RATE>([\d.]+)<\/RATE>/);
+
+      if (!usdMatch || !eurMatch) throw new Error('Could not parse BOI rates');
+
+      return {
+        USD: parseFloat(usdMatch[1]),
+        EUR: parseFloat(eurMatch[1]),
+      };
+    },
+  ];
+
+  for (const apiFn of apis) {
+    try {
+      const rates = await apiFn();
+      if (rates.USD > 0 && rates.EUR > 0) {
+        console.log('Exchange rates fetched successfully:', rates);
+        return rates;
+      }
+    } catch (error) {
+      console.warn('API failed, trying next...', error);
+      continue;
     }
-
-    const data = await response.json();
-
-    // Frankfurter returns rates FROM ILS, we need TO ILS
-    return {
-      USD: 1 / data.rates.USD,
-      EUR: 1 / data.rates.EUR,
-    };
-  } catch {
-    // Fallback to Bank of Israel or default values
-    console.warn('Could not fetch exchange rates, using defaults');
-    return null;
   }
+
+  console.warn('All exchange rate APIs failed, using defaults');
+  return null;
 }
 
 // ===== Singleton Export =====

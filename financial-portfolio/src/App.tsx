@@ -10,6 +10,9 @@ import { History } from '@/pages/History';
 import { Calculator } from '@/pages/Calculator';
 import { Groups } from '@/pages/Groups';
 import { Settings } from '@/pages/Settings';
+import { Analysis } from '@/pages/Analysis';
+import { Dividends } from '@/pages/Dividends';
+import { TaxReport } from '@/pages/TaxReport';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -34,6 +37,9 @@ export default function App() {
             <Route path="/cash-flow" element={<CashFlow />} />
             <Route path="/history" element={<History />} />
             <Route path="/calculator" element={<Calculator />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="/dividends" element={<Dividends />} />
+            <Route path="/tax-report" element={<TaxReport />} />
             <Route path="/groups" element={<Groups />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
