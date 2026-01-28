@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus, RefreshCw, Search, Filter, Trash2, Edit2, TrendingUp, TrendingDown } from 'lucide-react';
 import { usePortfolioStore, useHoldings, useGroups, useExchangeRates } from '@/stores/portfolioStore';
-import { Card, CardHeader, CardTitle, CardContent, Button } from '@/components/common';
+import { Card, CardContent, Button } from '@/components/common';
 import { formatCurrency, formatPercent, formatNumber } from '@/utils/formatters';
 import { calculateHolding } from '@/services/calculationService';
 import type { Holding, Currency, HoldingWithCalculations } from '@/types';
