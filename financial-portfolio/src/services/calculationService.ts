@@ -218,6 +218,220 @@ export function calculateAllocation(
   };
 }
 
+// ===== Advanced Risk Metrics =====
+
+export interface RiskMetrics {
+  sharpeRatio: number | null;
+  sortinoRatio: number | null;
+  maxDrawdown: number;
+  maxDrawdownDate: string | null;
+  volatility: number;
+  beta: number | null;
+}
+
+export interface ConcentrationRisk {
+  topHoldingPercent: number;
+  top5HoldingsPercent: number;
+  herfindahlIndex: number; // HHI - measure of concentration
+  isConcentrated: boolean;
+}
+
+export interface CurrencyExposure {
+  ILS: number;
+  USD: number;
+  EUR: number;
+  totalILS: number;
+}
+
+// Calculate returns from snapshots
+function calculateReturns(snapshots: Snapshot[]): number[] {
+  if (snapshots.length < 2) return [];
+
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  const returns: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    const prevValue = prev.stocksValue + prev.bondsValue + prev.cashTotal;
+    const currValue = curr.stocksValue + curr.bondsValue + curr.cashTotal;
+
+    if (prevValue > 0) {
+      returns.push((currValue - prevValue) / prevValue);
+    }
+  }
+
+  return returns;
+}
+
+// Calculate standard deviation
+function standardDeviation(values: number[]): number {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const squaredDiffs = values.map((v) => Math.pow(v - mean, 2));
+  return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / (values.length - 1));
+}
+
+// Calculate downside deviation (for Sortino)
+function downsideDeviation(returns: number[], threshold: number = 0): number {
+  const downsideReturns = returns.filter((r) => r < threshold);
+  if (downsideReturns.length < 2) return 0;
+  const squaredDiffs = downsideReturns.map((r) => Math.pow(r - threshold, 2));
+  return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / downsideReturns.length);
+}
+
+// Sharpe Ratio = (Return - Risk-free rate) / Standard Deviation
+export function calculateSharpeRatio(
+  snapshots: Snapshot[],
+  riskFreeRate: number = 0.04 // 4% annual risk-free rate
+): number | null {
+  const returns = calculateReturns(snapshots);
+  if (returns.length < 12) return null; // Need at least 12 periods
+
+  const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const annualizedReturn = avgReturn * 12; // Assuming monthly returns
+  const annualizedStdDev = standardDeviation(returns) * Math.sqrt(12);
+
+  if (annualizedStdDev === 0) return null;
+
+  return (annualizedReturn - riskFreeRate) / annualizedStdDev;
+}
+
+// Sortino Ratio = (Return - Risk-free rate) / Downside Deviation
+export function calculateSortinoRatio(
+  snapshots: Snapshot[],
+  riskFreeRate: number = 0.04
+): number | null {
+  const returns = calculateReturns(snapshots);
+  if (returns.length < 12) return null;
+
+  const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const annualizedReturn = avgReturn * 12;
+  const annualizedDownside = downsideDeviation(returns) * Math.sqrt(12);
+
+  if (annualizedDownside === 0) return null;
+
+  return (annualizedReturn - riskFreeRate) / annualizedDownside;
+}
+
+// Max Drawdown = largest peak-to-trough decline
+export function calculateMaxDrawdown(snapshots: Snapshot[]): {
+  maxDrawdown: number;
+  maxDrawdownDate: string | null;
+} {
+  if (snapshots.length < 2) {
+    return { maxDrawdown: 0, maxDrawdownDate: null };
+  }
+
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  let peak = 0;
+  let maxDrawdown = 0;
+  let maxDrawdownDate: string | null = null;
+
+  for (const snapshot of sorted) {
+    const value = snapshot.stocksValue + snapshot.bondsValue + snapshot.cashTotal;
+
+    if (value > peak) {
+      peak = value;
+    }
+
+    const drawdown = peak > 0 ? (peak - value) / peak : 0;
+
+    if (drawdown > maxDrawdown) {
+      maxDrawdown = drawdown;
+      maxDrawdownDate = snapshot.date;
+    }
+  }
+
+  return { maxDrawdown: maxDrawdown * 100, maxDrawdownDate };
+}
+
+// Calculate all risk metrics
+export function calculateRiskMetrics(snapshots: Snapshot[]): RiskMetrics {
+  const { maxDrawdown, maxDrawdownDate } = calculateMaxDrawdown(snapshots);
+  const returns = calculateReturns(snapshots);
+  const volatility = standardDeviation(returns) * Math.sqrt(12) * 100; // Annualized
+
+  return {
+    sharpeRatio: calculateSharpeRatio(snapshots),
+    sortinoRatio: calculateSortinoRatio(snapshots),
+    maxDrawdown,
+    maxDrawdownDate,
+    volatility,
+    beta: null, // Would need benchmark data
+  };
+}
+
+// Concentration risk analysis
+export function calculateConcentrationRisk(
+  holdings: HoldingWithCalculations[]
+): ConcentrationRisk {
+  const totalValue = holdings.reduce((sum, h) => sum + h.marketValueILS, 0);
+
+  if (totalValue === 0) {
+    return {
+      topHoldingPercent: 0,
+      top5HoldingsPercent: 0,
+      herfindahlIndex: 0,
+      isConcentrated: false,
+    };
+  }
+
+  // Sort by value descending
+  const sorted = [...holdings].sort((a, b) => b.marketValueILS - a.marketValueILS);
+
+  const topHoldingPercent =
+    sorted.length > 0 ? (sorted[0].marketValueILS / totalValue) * 100 : 0;
+
+  const top5HoldingsPercent =
+    sorted.slice(0, 5).reduce((sum, h) => sum + h.marketValueILS, 0) / totalValue * 100;
+
+  // Herfindahl-Hirschman Index (HHI)
+  const herfindahlIndex = holdings.reduce((sum, h) => {
+    const weight = h.marketValueILS / totalValue;
+    return sum + Math.pow(weight * 100, 2);
+  }, 0);
+
+  // HHI > 2500 is considered concentrated
+  // Single holding > 25% is considered concentrated
+  const isConcentrated = herfindahlIndex > 2500 || topHoldingPercent > 25;
+
+  return {
+    topHoldingPercent,
+    top5HoldingsPercent,
+    herfindahlIndex,
+    isConcentrated,
+  };
+}
+
+// Currency exposure analysis
+export function calculateCurrencyExposure(
+  holdings: HoldingWithCalculations[],
+  rates: ExchangeRates
+): CurrencyExposure {
+  const exposure = { ILS: 0, USD: 0, EUR: 0 };
+
+  holdings.forEach((h) => {
+    exposure[h.currency] += h.marketValue;
+  });
+
+  // Convert to ILS for total
+  const totalILS =
+    exposure.ILS +
+    exposure.USD * rates.USD +
+    exposure.EUR * rates.EUR;
+
+  return {
+    ...exposure,
+    totalILS,
+  };
+}
+
 // ===== Portfolio Summary =====
 export function calculatePortfolioSummary(
   holdings: Holding[],
