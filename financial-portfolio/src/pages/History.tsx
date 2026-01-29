@@ -18,7 +18,7 @@ interface HistoryItem {
 export function History() {
   const holdings = useHoldings();
   const cashAccounts = useCashAccounts();
-  const snapshots = usePortfolioStore((state) => state.snapshots);
+  const snapshots = usePortfolioStore((state) => state.snapshots) ?? [];
 
   const [filterType, setFilterType] = useState<string>('all');
   const [filterPeriod, setFilterPeriod] = useState<string>('all');

@@ -159,10 +159,15 @@ export function Charts() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={comparisonData} layout="vertical">
+                  <BarChart data={comparisonData} layout="vertical" margin={{ left: 20, right: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                     <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                    <YAxis type="category" dataKey="name" width={100} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={120}
+                      tick={{ fontSize: 12 }}
+                    />
                     <Tooltip formatter={(value: number) => `${value.toFixed(1)}%`} />
                     <Legend />
                     <Bar dataKey="current" name="נוכחי" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
