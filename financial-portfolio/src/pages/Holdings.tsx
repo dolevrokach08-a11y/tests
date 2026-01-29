@@ -4,6 +4,7 @@ import { usePortfolioStore, useHoldings, useGroups, useExchangeRates } from '@/s
 import { Card, CardContent, Button } from '@/components/common';
 import { formatCurrency, formatPercent, formatNumber } from '@/utils/formatters';
 import { calculateHolding } from '@/services/calculationService';
+import { usePriceRefresh } from '@/hooks/usePriceRefresh';
 import type { Holding, Currency, HoldingWithCalculations } from '@/types';
 
 export function Holdings() {
@@ -11,6 +12,7 @@ export function Holdings() {
   const groups = useGroups();
   const rates = useExchangeRates();
   const { addHolding, updateHolding, deleteHolding } = usePortfolioStore();
+  const { isRefreshing, refreshAll } = usePriceRefresh();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
@@ -69,9 +71,11 @@ export function Holdings() {
         <div className="flex gap-2">
           <Button
             variant="secondary"
-            leftIcon={<RefreshCw className="w-4 h-4" />}
+            leftIcon={<RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />}
+            onClick={refreshAll}
+            disabled={isRefreshing}
           >
-            עדכון מחירים
+            {isRefreshing ? 'מעדכן...' : 'עדכון מחירים'}
           </Button>
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
