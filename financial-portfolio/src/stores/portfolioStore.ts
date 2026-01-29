@@ -21,28 +21,88 @@ const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9
 const migrateOldData = (data: Record<string, unknown>): Portfolio => {
   const empty = createEmptyPortfolio();
 
-  // Ensure holdings array exists and each holding has transactions
+  // Get purchases and sales arrays for building transactions
+  const purchases = Array.isArray(data.purchases) ? data.purchases as Record<string, unknown>[] : [];
+  const sales = Array.isArray(data.sales) ? data.sales as Record<string, unknown>[] : [];
+
+  // Build transactions map by assetId
+  const transactionsByAsset = new Map<string, Transaction[]>();
+
+  // Process purchases -> buy transactions
+  purchases.forEach((p) => {
+    if (p.assetType !== 'stocks') return;
+    const assetId = String(p.assetId || p.id);
+    if (!transactionsByAsset.has(assetId)) {
+      transactionsByAsset.set(assetId, []);
+    }
+    transactionsByAsset.get(assetId)!.push({
+      id: String(p.id || generateId()),
+      type: 'buy',
+      date: String(p.date || new Date().toISOString()),
+      shares: Number(p.shares) || 0,
+      pricePerShare: Number(p.original_price) || Number(p.originalAmount) / Number(p.shares) || 0,
+      fees: Number(p.fee) || 0,
+      note: p.note ? String(p.note) : undefined,
+    });
+  });
+
+  // Process sales -> sell transactions
+  sales.forEach((s) => {
+    if (s.assetType !== 'stocks') return;
+    const assetId = String(s.assetId);
+    if (!transactionsByAsset.has(assetId)) {
+      transactionsByAsset.set(assetId, []);
+    }
+    transactionsByAsset.get(assetId)!.push({
+      id: String(s.id || generateId()),
+      type: 'sell',
+      date: String(s.date || new Date().toISOString()),
+      shares: Number(s.shares) || 0,
+      pricePerShare: Number(s.salePrice) || Number(s.original_price) || 0,
+      fees: Number(s.commission) || 0,
+      note: s.note ? String(s.note) : undefined,
+    });
+  });
+
+  // Ensure holdings array exists and attach transactions
   const holdings: Holding[] = Array.isArray(data.holdings)
-    ? data.holdings.map((h: Record<string, unknown>) => ({
-        id: String(h.id || generateId()),
-        symbol: String(h.symbol || h.ticker || ''),
-        name: String(h.name || h.symbol || ''),
-        shares: Number(h.shares) || Number(h.units) || 0,
-        currency: (h.currency as Currency) || 'ILS',
-        groupId: h.groupId ? String(h.groupId) : (h.group ? String(h.group) : null),
-        currentPrice: Number(h.currentPrice) || Number(h.price) || 0,
-        lastUpdate: String(h.lastUpdate || new Date().toISOString()),
-        transactions: Array.isArray(h.transactions) ? h.transactions : [],
-      }))
+    ? data.holdings.map((h: Record<string, unknown>) => {
+        const holdingId = String(h.id || generateId());
+        const existingTx = transactionsByAsset.get(holdingId) || [];
+
+        // If no transactions from purchases, create one from costBasis
+        if (existingTx.length === 0 && h.costBasis && h.shares) {
+          existingTx.push({
+            id: generateId(),
+            type: 'buy',
+            date: String(h.purchaseDate || new Date().toISOString()),
+            shares: Number(h.shares),
+            pricePerShare: Number(h.costBasis),
+            fees: 0,
+          });
+        }
+
+        return {
+          id: holdingId,
+          symbol: String(h.symbol || h.ticker || ''),
+          name: String(h.name || h.symbol || ''),
+          shares: Number(h.shares) || Number(h.units) || 0,
+          currency: (h.currency as Currency) || 'ILS',
+          groupId: h.groupId !== undefined ? String(h.groupId) : null,
+          currentPrice: Number(h.currentPrice) || Number(h.price) || 0,
+          lastUpdate: String(h.lastUpdate || new Date().toISOString()),
+          transactions: existingTx,
+        };
+      })
     : [];
 
   // Ensure bonds array exists
   const bonds: Bond[] = Array.isArray(data.bonds)
     ? data.bonds.map((b: Record<string, unknown>) => ({
         id: String(b.id || generateId()),
-        name: String(b.name || ''),
+        name: String(b.name || b.symbol || ''),
         units: Number(b.units) || 0,
-        costBasis: Number(b.costBasis) || Number(b.cost) || 0,
+        costBasis: (Number(b.costBasis) || 0) * (Number(b.units) || 1), // costBasis is per unit in old format
         currentPrice: Number(b.currentPrice) || Number(b.price) || 0,
         lastUpdate: String(b.lastUpdate || new Date().toISOString()),
         maturityDate: b.maturityDate ? String(b.maturityDate) : undefined,
@@ -50,7 +110,7 @@ const migrateOldData = (data: Record<string, unknown>): Portfolio => {
       }))
     : [];
 
-  // Ensure groups array exists
+  // Ensure groups array exists (old format uses 'target' instead of 'targetPercent')
   const groups: Group[] = Array.isArray(data.groups)
     ? data.groups.map((g: Record<string, unknown>) => ({
         id: String(g.id || generateId()),
@@ -60,91 +120,116 @@ const migrateOldData = (data: Record<string, unknown>): Portfolio => {
       }))
     : empty.groups;
 
+  // Build cash transactions from deposits and withdrawals
+  const deposits = Array.isArray(data.deposits) ? data.deposits as Record<string, unknown>[] : [];
+  const withdrawals = Array.isArray(data.withdrawals) ? data.withdrawals as Record<string, unknown>[] : [];
+
+  const cashTransactions: Record<Currency, CashTransaction[]> = { ILS: [], USD: [], EUR: [] };
+
+  deposits.forEach((d) => {
+    const currency = (d.currency as Currency) || 'ILS';
+    cashTransactions[currency].push({
+      id: String(d.id || generateId()),
+      type: 'deposit',
+      date: String(d.date || new Date().toISOString()),
+      amount: Number(d.amount) || 0,
+      note: d.note ? String(d.note) : undefined,
+    });
+  });
+
+  withdrawals.forEach((w) => {
+    const currency = (w.currency as Currency) || 'ILS';
+    cashTransactions[currency].push({
+      id: String(w.id || generateId()),
+      type: 'withdrawal',
+      date: String(w.date || new Date().toISOString()),
+      amount: Number(w.amount) || 0,
+      note: w.note ? String(w.note) : undefined,
+    });
+  });
+
   // Ensure cashAccounts exists with proper structure
   let cashAccounts = empty.cashAccounts;
 
-  // Helper function to extract cash account from various formats
-  const getCashAccount = (currency: Currency, currencyData: unknown) => {
-    if (typeof currencyData === 'number') {
-      return { currency, balance: currencyData, transactions: [] as CashTransaction[] };
-    }
-    if (currencyData && typeof currencyData === 'object') {
-      const cd = currencyData as Record<string, unknown>;
-      return {
-        currency,
-        balance: Number(cd.balance) || 0,
-        transactions: Array.isArray(cd.transactions) ? cd.transactions as CashTransaction[] : [],
-      };
-    }
-    return { currency, balance: 0, transactions: [] as CashTransaction[] };
-  };
-
-  if (data.cashAccounts && typeof data.cashAccounts === 'object') {
-    const ca = data.cashAccounts as Record<string, unknown>;
-    cashAccounts = {
-      ILS: getCashAccount('ILS', ca.ILS),
-      USD: getCashAccount('USD', ca.USD),
-      EUR: getCashAccount('EUR', ca.EUR),
-    };
-  } else if (data.cash && typeof data.cash === 'object') {
-    // Old format using 'cash' object
+  if (data.cash && typeof data.cash === 'object') {
     const cash = data.cash as Record<string, unknown>;
     cashAccounts = {
-      ILS: getCashAccount('ILS', cash.ILS),
-      USD: getCashAccount('USD', cash.USD),
-      EUR: getCashAccount('EUR', cash.EUR),
+      ILS: { currency: 'ILS', balance: Number(cash.ILS) || 0, transactions: cashTransactions.ILS },
+      USD: { currency: 'USD', balance: Number(cash.USD) || 0, transactions: cashTransactions.USD },
+      EUR: { currency: 'EUR', balance: Number(cash.EUR) || 0, transactions: cashTransactions.EUR },
     };
-  } else if (data.cashILS !== undefined || data.cashUSD !== undefined || data.cashEUR !== undefined) {
-    // Another old format with separate cash fields
+  } else if (data.cashAccounts && typeof data.cashAccounts === 'object') {
+    const ca = data.cashAccounts as Record<string, Record<string, unknown>>;
     cashAccounts = {
-      ILS: { currency: 'ILS', balance: Number(data.cashILS) || 0, transactions: [] },
-      USD: { currency: 'USD', balance: Number(data.cashUSD) || 0, transactions: [] },
-      EUR: { currency: 'EUR', balance: Number(data.cashEUR) || 0, transactions: [] },
+      ILS: {
+        currency: 'ILS',
+        balance: Number(ca.ILS?.balance) || 0,
+        transactions: [...(Array.isArray(ca.ILS?.transactions) ? ca.ILS.transactions as CashTransaction[] : []), ...cashTransactions.ILS],
+      },
+      USD: {
+        currency: 'USD',
+        balance: Number(ca.USD?.balance) || 0,
+        transactions: [...(Array.isArray(ca.USD?.transactions) ? ca.USD.transactions as CashTransaction[] : []), ...cashTransactions.USD],
+      },
+      EUR: {
+        currency: 'EUR',
+        balance: Number(ca.EUR?.balance) || 0,
+        transactions: [...(Array.isArray(ca.EUR?.transactions) ? ca.EUR.transactions as CashTransaction[] : []), ...cashTransactions.EUR],
+      },
     };
   }
 
-  // Ensure snapshots array exists and migrate old format if needed
+  // Migrate snapshots (old format uses different field names)
   let snapshots: Snapshot[] = [];
   if (Array.isArray(data.snapshots)) {
-    snapshots = data.snapshots.map((s: Record<string, unknown>) => ({
-      id: String(s.id || generateId()),
-      date: String(s.date || new Date().toISOString()),
-      trigger: (s.trigger as 'deposit' | 'withdrawal' | 'manual' | 'daily') || 'manual',
-      note: s.note ? String(s.note) : undefined,
-      valueBeforeFlow: Number(s.valueBeforeFlow) || Number(s.totalValue) || 0,
-      cashFlow: Number(s.cashFlow) || Number(s.flow) || 0,
-      stocksValue: Number(s.stocksValue) || Number(s.stocks) || 0,
-      bondsValue: Number(s.bondsValue) || Number(s.bonds) || 0,
-      cashTotal: Number(s.cashTotal) || Number(s.cash) || 0,
-    }));
-  } else if (Array.isArray(data.history)) {
-    // Some old formats might use 'history' instead of 'snapshots'
-    snapshots = (data.history as Record<string, unknown>[]).map((s) => ({
-      id: String(s.id || generateId()),
-      date: String(s.date || new Date().toISOString()),
-      trigger: 'manual' as const,
-      valueBeforeFlow: Number(s.value) || Number(s.totalValue) || 0,
-      cashFlow: Number(s.cashFlow) || 0,
-      stocksValue: Number(s.stocksValue) || Number(s.stocks) || 0,
-      bondsValue: Number(s.bondsValue) || Number(s.bonds) || 0,
-      cashTotal: Number(s.cashTotal) || Number(s.cash) || 0,
-    }));
+    snapshots = data.snapshots.map((s: Record<string, unknown>) => {
+      // Map triggerType to trigger
+      let trigger: 'deposit' | 'withdrawal' | 'manual' | 'daily' = 'manual';
+      if (s.triggerType === 'deposit' || s.trigger === 'deposit') trigger = 'deposit';
+      else if (s.triggerType === 'withdrawal' || s.trigger === 'withdrawal') trigger = 'withdrawal';
+      else if (s.triggerType === 'daily' || s.trigger === 'daily') trigger = 'daily';
+
+      return {
+        id: String(s.id || generateId()),
+        date: String(s.date || new Date().toISOString()),
+        trigger,
+        note: s.triggerNote ? String(s.triggerNote) : (s.note ? String(s.note) : undefined),
+        // Old format uses value_before_flow and cash_flow (with underscores)
+        valueBeforeFlow: Number(s.value_before_flow) || Number(s.valueBeforeFlow) || 0,
+        cashFlow: Number(s.cash_flow) || Number(s.cashFlow) || 0,
+        // These might not exist in old format, calculate from totalValue if needed
+        stocksValue: Number(s.stocksValue) || Number(s.stocks) || 0,
+        bondsValue: Number(s.bondsValue) || Number(s.bonds) || 0,
+        cashTotal: Number(s.cashTotal) || Number(s.cash) || 0,
+      };
+    });
   }
 
-  // Ensure exchangeRates exists
-  const exchangeRates: ExchangeRates = {
-    USD: Number((data.exchangeRates as Record<string, unknown>)?.USD) || empty.exchangeRates.USD,
-    EUR: Number((data.exchangeRates as Record<string, unknown>)?.EUR) || empty.exchangeRates.EUR,
-    lastUpdate:
-      ((data.exchangeRates as Record<string, unknown>)?.lastUpdate as string) ||
-      new Date().toISOString(),
-  };
+  // Ensure exchangeRates exists (old format uses 'rates')
+  let exchangeRates: ExchangeRates = empty.exchangeRates;
+  if (data.exchangeRates && typeof data.exchangeRates === 'object') {
+    const er = data.exchangeRates as Record<string, unknown>;
+    exchangeRates = {
+      USD: Number(er.USD) || empty.exchangeRates.USD,
+      EUR: Number(er.EUR) || empty.exchangeRates.EUR,
+      lastUpdate: String(er.lastUpdate || new Date().toISOString()),
+    };
+  } else if (data.rates && typeof data.rates === 'object') {
+    const rates = data.rates as Record<string, unknown>;
+    exchangeRates = {
+      USD: Number(rates.USD) || empty.exchangeRates.USD,
+      EUR: Number(rates.EUR) || empty.exchangeRates.EUR,
+      lastUpdate: new Date().toISOString(),
+    };
+  }
 
   // Ensure settings exists
   const settings: PortfolioSettings = {
     ...empty.settings,
     ...(data.settings as Partial<PortfolioSettings>),
   };
+
+  console.log('Migration complete:', { holdings: holdings.length, bonds: bonds.length, snapshots: snapshots.length });
 
   return {
     holdings,
