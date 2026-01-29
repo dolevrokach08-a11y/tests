@@ -68,7 +68,7 @@ export function calculateBond(bond: Bond): BondWithCalculations {
 
 // ===== TWR Calculation =====
 export function calculateTWR(snapshots: Snapshot[]): TWRResult | null {
-  if (snapshots.length < 2) {
+  if (!snapshots || snapshots.length < 2) {
     return null;
   }
 
@@ -453,17 +453,17 @@ export function calculatePortfolioSummary(
   const bondsWithCalc = bonds.map(calculateBond);
   const bondsValue = bondsWithCalc.reduce((sum, b) => sum + b.marketValue, 0);
 
-  // Calculate cash
+  // Calculate cash (with defensive checks)
   const cashByCategory: Record<Currency, number> = {
-    ILS: cashAccounts.ILS.balance,
-    USD: cashAccounts.USD.balance,
-    EUR: cashAccounts.EUR.balance,
+    ILS: cashAccounts?.ILS?.balance ?? 0,
+    USD: cashAccounts?.USD?.balance ?? 0,
+    EUR: cashAccounts?.EUR?.balance ?? 0,
   };
 
   const cashValue =
     cashByCategory.ILS +
-    cashByCategory.USD * rates.USD +
-    cashByCategory.EUR * rates.EUR;
+    cashByCategory.USD * (rates?.USD ?? 1) +
+    cashByCategory.EUR * (rates?.EUR ?? 1);
 
   // Total portfolio value
   const totalValueILS = stocksValue + bondsValue + cashValue;
