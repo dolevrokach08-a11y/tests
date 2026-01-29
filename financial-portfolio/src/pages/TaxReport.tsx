@@ -38,9 +38,12 @@ export function TaxReport() {
     const events: TaxableEvent[] = [];
 
     holdings.forEach((holding) => {
+      // Skip if no transactions array
+      const transactions = holding.transactions ?? [];
+
       // Sales
-      const sales = holding.transactions.filter((t) => t.type === 'sell');
-      const buys = holding.transactions.filter((t) => t.type === 'buy');
+      const sales = transactions.filter((t) => t.type === 'sell');
+      const buys = transactions.filter((t) => t.type === 'buy');
 
       sales.forEach((sale) => {
         const saleDate = new Date(sale.date);
@@ -87,7 +90,7 @@ export function TaxReport() {
       });
 
       // Dividends
-      const dividends = holding.transactions.filter((t) => t.type === 'dividend');
+      const dividends = transactions.filter((t) => t.type === 'dividend');
       dividends.forEach((div) => {
         const divDate = new Date(div.date);
         if (divDate.getFullYear() !== selectedYear) return;
@@ -206,7 +209,7 @@ export function TaxReport() {
   const years = useMemo(() => {
     const yearsSet = new Set<number>();
     holdings.forEach((h) => {
-      h.transactions.forEach((t) => {
+      (h.transactions ?? []).forEach((t) => {
         yearsSet.add(new Date(t.date).getFullYear());
       });
     });

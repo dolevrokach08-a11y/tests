@@ -31,8 +31,9 @@ export function calculateHolding(
   holding: Holding,
   rates: ExchangeRates
 ): HoldingWithCalculations {
-  // Calculate cost basis from transactions
-  const costBasis = holding.transactions
+  // Calculate cost basis from transactions (with defensive check)
+  const transactions = holding.transactions ?? [];
+  const costBasis = transactions
     .filter((t) => t.type === 'buy')
     .reduce((sum, t) => sum + t.shares * t.pricePerShare + t.fees, 0);
 

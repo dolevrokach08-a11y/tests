@@ -39,7 +39,7 @@ export function Dividends() {
     const dividends: DividendRecord[] = [];
 
     holdings.forEach((holding) => {
-      holding.transactions
+      (holding.transactions ?? [])
         .filter((t) => t.type === 'dividend')
         .forEach((t) => {
           dividends.push({
