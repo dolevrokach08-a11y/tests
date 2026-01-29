@@ -28,7 +28,7 @@ export function History() {
 
   // Add holding transactions
   holdings.forEach((holding) => {
-    holding.transactions.forEach((tx) => {
+    (holding.transactions ?? []).forEach((tx) => {
       historyItems.push({
         id: tx.id,
         date: tx.date,
@@ -43,7 +43,7 @@ export function History() {
 
   // Add cash transactions
   (['ILS', 'USD', 'EUR'] as Currency[]).forEach((currency) => {
-    cashAccounts[currency].transactions.forEach((tx) => {
+    (cashAccounts[currency]?.transactions ?? []).forEach((tx) => {
       historyItems.push({
         id: tx.id,
         date: tx.date,

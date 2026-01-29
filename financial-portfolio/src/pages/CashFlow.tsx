@@ -21,17 +21,17 @@ export function CashFlow() {
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false);
   const [transactionType, setTransactionType] = useState<'deposit' | 'withdrawal'>('deposit');
 
-  // Calculate totals
-  const totalILS = cashAccounts.ILS.balance;
-  const totalUSD = cashAccounts.USD.balance;
-  const totalEUR = cashAccounts.EUR.balance;
-  const totalInILS = totalILS + totalUSD * rates.USD + totalEUR * rates.EUR;
+  // Calculate totals (with defensive checks)
+  const totalILS = cashAccounts?.ILS?.balance ?? 0;
+  const totalUSD = cashAccounts?.USD?.balance ?? 0;
+  const totalEUR = cashAccounts?.EUR?.balance ?? 0;
+  const totalInILS = totalILS + totalUSD * (rates?.USD ?? 1) + totalEUR * (rates?.EUR ?? 1);
 
-  // Get recent transactions
+  // Get recent transactions (with defensive checks)
   const allTransactions = [
-    ...cashAccounts.ILS.transactions.map((t) => ({ ...t, currency: 'ILS' as Currency })),
-    ...cashAccounts.USD.transactions.map((t) => ({ ...t, currency: 'USD' as Currency })),
-    ...cashAccounts.EUR.transactions.map((t) => ({ ...t, currency: 'EUR' as Currency })),
+    ...(cashAccounts?.ILS?.transactions ?? []).map((t) => ({ ...t, currency: 'ILS' as Currency })),
+    ...(cashAccounts?.USD?.transactions ?? []).map((t) => ({ ...t, currency: 'USD' as Currency })),
+    ...(cashAccounts?.EUR?.transactions ?? []).map((t) => ({ ...t, currency: 'EUR' as Currency })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const handleTransaction = (
