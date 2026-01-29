@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSettings, usePortfolioStore } from '@/stores/portfolioStore';
+import { fetchExchangeRates } from '@/services/priceService';
 
 interface LayoutProps {
   children: ReactNode;
@@ -44,7 +45,24 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const settings = useSettings();
   const updateSettings = usePortfolioStore((state) => state.updateSettings);
+  const updateExchangeRates = usePortfolioStore((state) => state.updateExchangeRates);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Fetch exchange rates on mount
+  useEffect(() => {
+    const loadRates = async () => {
+      try {
+        const rates = await fetchExchangeRates();
+        if (rates) {
+          updateExchangeRates({ ...rates, lastUpdate: new Date().toISOString() });
+          console.log('Exchange rates loaded:', rates);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange rates:', error);
+      }
+    };
+    loadRates();
+  }, [updateExchangeRates]);
 
   const toggleDarkMode = () => {
     updateSettings({ darkMode: !settings.darkMode });
